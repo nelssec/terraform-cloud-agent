@@ -1,0 +1,104 @@
+# =============================================================================
+# Qualys Credentials
+# =============================================================================
+
+# Get ActivationId and CustomerId from Qualys Console > Assets > Agents
+qualys_activation_id = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+qualys_customer_id   = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+
+# Agent server URI — where the installed agent phones home.
+# Find yours at: https://www.qualys.com/platform-identification
+# Examples:
+#   US Platform 1:  https://qagpublic.qg1.apps.qualys.com/CloudAgent/
+#   US Platform 2:  https://qagpublic.qg2.apps.qualys.com/CloudAgent/
+#   US Platform 3:  https://qagpublic.qg3.apps.qualys.com/CloudAgent/
+#   EU Platform 1:  https://qagpublic.qg1.apps.qualys.eu/CloudAgent/
+#   India:          https://qagpublic.qg1.apps.qualys.in/CloudAgent/
+qualys_server_uri = "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+
+# API base URL — used to download agent binaries.
+# This is different from server_uri. Match it to your platform.
+# Examples:
+#   US Platform 1:  https://qualysguard.qualys.com
+#   US Platform 2:  https://qualysguard.qg2.apps.qualys.com
+#   US Platform 3:  https://qualysguard.qg3.apps.qualys.com
+#   EU Platform 1:  https://qualysguard.qualys.eu
+#   India:          https://qualysguard.qg1.apps.qualys.in
+qualys_base_url = "https://qualysguard.qg2.apps.qualys.com"
+
+# API credentials — needs: Access Permission API Access +
+# Asset Management Permission Read Asset
+qualys_api_username = "api_user"
+qualys_api_password = "secure_password"
+
+# =============================================================================
+# Deployment Settings
+# =============================================================================
+
+environment   = "prod"
+deployment_id = "qualys-2024-01"
+
+tags = {
+  owner       = "security-team"
+  cost_center = "it-security"
+}
+
+# =============================================================================
+# Enable clouds
+# =============================================================================
+
+deploy_to_gcp      = true
+deploy_to_aws      = false
+deploy_to_azure    = false
+deploy_to_oci      = false
+deploy_to_alicloud = false
+
+# =============================================================================
+# GCP
+# =============================================================================
+
+gcp_config = {
+  project_id = "my-gcp-project-id"
+  region     = "us-central1"
+  zones      = ["us-central1-a", "us-central1-b", "us-central1-c"]
+
+  # Opt-in: only VMs with label qualys-agent=true
+  target_all_vms   = false
+  inclusion_labels = { "qualys-agent" = "true" }
+  exclusion_labels = {}
+  rollout_percent  = 10
+}
+
+# =============================================================================
+# AWS (uncomment module + provider in main.tf first)
+# =============================================================================
+
+# aws_config = {
+#   region      = "us-east-1"
+#   target_tags = { "qualys-agent" = "true" }
+# }
+
+# =============================================================================
+# Azure (uncomment module + provider in main.tf first)
+# =============================================================================
+
+# azure_config = {
+#   resource_group_name = "qualys-agents-rg"
+#   location            = "East US"
+# }
+
+# =============================================================================
+# OCI (uncomment module + provider in main.tf first)
+# =============================================================================
+
+# oci_config = {
+#   compartment_id = "ocid1.compartment.oc1..aaaaaaaa..."
+# }
+
+# =============================================================================
+# Alibaba Cloud (uncomment module + provider in main.tf first)
+# =============================================================================
+
+# alicloud_config = {
+#   region = "us-west-1"
+# }
