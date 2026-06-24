@@ -13,17 +13,20 @@ output "gcp_deployment" {
 
 # output "aws_deployment" {
 #   value = var.deploy_to_aws ? {
-#     secret_arn          = module.aws_qualys[0].secret_arn
-#     iam_policy_arn      = module.aws_qualys[0].iam_policy_arn
-#     ssm_document_linux  = module.aws_qualys[0].ssm_document_linux
-#     ssm_document_windows = module.aws_qualys[0].ssm_document_windows
+#     secret_activation_arn = module.aws_qualys[0].secret_activation_arn
+#     secret_customer_arn   = module.aws_qualys[0].secret_customer_arn
+#     iam_policy_arn        = module.aws_qualys[0].iam_policy_arn
+#     ssm_document_linux    = module.aws_qualys[0].ssm_document_linux
+#     ssm_document_windows  = module.aws_qualys[0].ssm_document_windows
 #   } : null
 # }
 
 # output "azure_deployment" {
 #   value = var.deploy_to_azure ? {
-#     key_vault_name = module.azure_qualys[0].key_vault_name
-#     key_vault_uri  = module.azure_qualys[0].key_vault_uri
+#     key_vault_name         = module.azure_qualys[0].key_vault_name
+#     key_vault_uri          = module.azure_qualys[0].key_vault_uri
+#     install_script_linux   = module.azure_qualys[0].install_script_linux
+#     install_script_windows = module.azure_qualys[0].install_script_windows
 #   } : null
 # }
 
@@ -43,7 +46,6 @@ output "gcp_deployment" {
 
 output "deployment_summary" {
   value = {
-    qualys_base_url   = var.qualys_base_url
     qualys_server_uri = var.qualys_server_uri
     environment       = var.environment
     deployment_id     = var.deployment_id

@@ -30,19 +30,14 @@ variable "qualys_server_uri" {
   type        = string
 }
 
-variable "qualys_base_url" {
-  description = "Qualys API base URL (e.g., https://qualysguard.qg2.apps.qualys.com)"
-  type        = string
-}
-
-variable "qualys_api_username" {
-  type      = string
-  sensitive = true
-}
-
-variable "qualys_api_password" {
-  type      = string
-  sensitive = true
+variable "qualys_packages" {
+  description = "Pre-staged installer URLs the instances pull from (deb/rpm/windows). No Qualys API creds reach the fleet."
+  type = object({
+    deb     = optional(string, "")
+    rpm     = optional(string, "")
+    windows = optional(string, "")
+  })
+  default = {}
 }
 
 variable "region" {
@@ -61,25 +56,29 @@ variable "tags" {
 }
 
 # -----------------------------------------------------------------------------
-# Secrets Manager — store all Qualys credentials
+# Secrets Manager — store the Qualys enrollment IDs (one secret each)
 # -----------------------------------------------------------------------------
 
-resource "aws_secretsmanager_secret" "qualys_credentials" {
-  name                    = "qualys-agent-credentials"
+resource "aws_secretsmanager_secret" "qualys_activation_id" {
+  name                    = "qualys-activation-id"
   recovery_window_in_days = 7
   tags                    = var.tags
 }
 
-resource "aws_secretsmanager_secret_version" "qualys_credentials" {
-  secret_id = aws_secretsmanager_secret.qualys_credentials.id
-  secret_string = jsonencode({
-    activation_id = var.qualys_activation_id
-    customer_id   = var.qualys_customer_id
-    server_uri    = var.qualys_server_uri
-    base_url      = var.qualys_base_url
-    api_username  = var.qualys_api_username
-    api_password  = var.qualys_api_password
-  })
+resource "aws_secretsmanager_secret_version" "qualys_activation_id" {
+  secret_id     = aws_secretsmanager_secret.qualys_activation_id.id
+  secret_string = var.qualys_activation_id
+}
+
+resource "aws_secretsmanager_secret" "qualys_customer_id" {
+  name                    = "qualys-customer-id"
+  recovery_window_in_days = 7
+  tags                    = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "qualys_customer_id" {
+  secret_id     = aws_secretsmanager_secret.qualys_customer_id.id
+  secret_string = var.qualys_customer_id
 }
 
 # -----------------------------------------------------------------------------
@@ -94,9 +93,12 @@ resource "aws_iam_policy" "qualys_secret_read" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = aws_secretsmanager_secret.qualys_credentials.arn
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = [
+          aws_secretsmanager_secret.qualys_activation_id.arn,
+          aws_secretsmanager_secret.qualys_customer_id.arn,
+        ]
       }
     ]
   })
@@ -129,30 +131,25 @@ resource "aws_ssm_document" "install_qualys_linux" {
             "#!/bin/bash",
             "set -e",
             "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then echo 'Agent already running'; exit 0; fi",
-            "SECRET=$(aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_credentials.arn}' --region '${var.region}' --query SecretString --output text)",
-            "ACTIVATION_ID=$(echo \"$SECRET\" | jq -r '.activation_id')",
-            "CUSTOMER_ID=$(echo \"$SECRET\" | jq -r '.customer_id')",
-            "SERVER_URI=$(echo \"$SECRET\" | jq -r '.server_uri')",
-            "BASE_URL=$(echo \"$SECRET\" | jq -r '.base_url')",
-            "API_USER=$(echo \"$SECRET\" | jq -r '.api_username')",
-            "API_PASS=$(echo \"$SECRET\" | jq -r '.api_password')",
+            "ACTIVATION_ID=$(aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_activation_id.arn}' --region '${var.region}' --query SecretString --output text)",
+            "CUSTOMER_ID=$(aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_customer_id.arn}' --region '${var.region}' --query SecretString --output text)",
             "if command -v apt-get >/dev/null 2>&1; then",
-            "  PLATFORM=LINUX_UBUNTU",
+            "  PKG_URL='${var.qualys_packages.deb}'",
             "  AGENT_FILE=/tmp/qualys-agent.deb",
             "else",
-            "  PLATFORM=LINUX",
+            "  PKG_URL='${var.qualys_packages.rpm}'",
             "  AGENT_FILE=/tmp/qualys-agent.rpm",
             "fi",
-            "curl -u \"$API_USER:$API_PASS\" -X POST -H 'Content-Type: text/xml' -H 'X-Requested-With: curl' -d \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><ServiceRequest><data><DownloadBinary><platform>$PLATFORM</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>\" \"$BASE_URL/qps/rest/1.0/download/ca/downloadbinary/\" -o \"$AGENT_FILE\"",
+            "curl -fSL \"$PKG_URL\" -o \"$AGENT_FILE\"",
             "if command -v apt-get >/dev/null 2>&1; then",
             "  dpkg -i $AGENT_FILE || apt-get install -f -y",
             "else",
             "  rpm -ivh $AGENT_FILE || yum install -y $AGENT_FILE || dnf install -y $AGENT_FILE",
             "fi",
-            "/usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh ActivationId=\"$ACTIVATION_ID\" CustomerId=\"$CUSTOMER_ID\" ServerUri=\"$SERVER_URI\"",
+            "/usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh ActivationId=\"$ACTIVATION_ID\" CustomerId=\"$CUSTOMER_ID\" ServerUri=\"${var.qualys_server_uri}\"",
             "systemctl enable qualys-cloud-agent && systemctl restart qualys-cloud-agent",
             "rm -f $AGENT_FILE",
-            "unset ACTIVATION_ID CUSTOMER_ID SERVER_URI API_USER API_PASS SECRET",
+            "unset ACTIVATION_ID CUSTOMER_ID",
           ]
         }
       }
@@ -185,12 +182,10 @@ resource "aws_ssm_document" "install_qualys_windows" {
           runCommand = [
             "$ErrorActionPreference = 'Stop'",
             "if (Get-Service -Name QualysAgent -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Running' }) { Write-Host 'Agent already running'; exit 0 }",
-            "$Secret = (aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_credentials.arn}' --region '${var.region}' --query SecretString --output text) | ConvertFrom-Json",
-            "$Cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(\"$($Secret.api_username):$($Secret.api_password)\"))",
-            "$Body = '<?xml version=\"1.0\" encoding=\"UTF-8\"?><ServiceRequest><data><DownloadBinary><platform>WINDOWS</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>'",
-            "$Headers = @{ Authorization = \"Basic $Cred\"; 'Content-Type' = 'text/xml'; 'X-Requested-With' = 'PowerShell' }",
-            "Invoke-WebRequest -Uri \"$($Secret.base_url)/qps/rest/1.0/download/ca/downloadbinary/\" -Method Post -Headers $Headers -Body $Body -OutFile \"$env:TEMP\\QualysAgent.exe\"",
-            "Start-Process -FilePath \"$env:TEMP\\QualysAgent.exe\" -ArgumentList @('/install', '/quiet', '/norestart', \"CustomerId={$($Secret.customer_id)}\", \"ActivationId={$($Secret.activation_id)}\", \"ServerUri=$($Secret.server_uri)\") -Wait -PassThru",
+            "$ActivationId = (aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_activation_id.arn}' --region '${var.region}' --query SecretString --output text)",
+            "$CustomerId = (aws secretsmanager get-secret-value --secret-id '${aws_secretsmanager_secret.qualys_customer_id.arn}' --region '${var.region}' --query SecretString --output text)",
+            "Invoke-WebRequest -Uri '${var.qualys_packages.windows}' -OutFile \"$env:TEMP\\QualysAgent.exe\"",
+            "Start-Process -FilePath \"$env:TEMP\\QualysAgent.exe\" -ArgumentList @('/install', '/quiet', '/norestart', \"CustomerId={$CustomerId}\", \"ActivationId={$ActivationId}\", \"ServerUri=${var.qualys_server_uri}\") -Wait -PassThru",
             "Remove-Item \"$env:TEMP\\QualysAgent.exe\" -Force -ErrorAction SilentlyContinue",
           ]
         }
@@ -233,8 +228,12 @@ resource "aws_ssm_association" "qualys_windows" {
 # Outputs
 # -----------------------------------------------------------------------------
 
-output "secret_arn" {
-  value = aws_secretsmanager_secret.qualys_credentials.arn
+output "secret_activation_arn" {
+  value = aws_secretsmanager_secret.qualys_activation_id.arn
+}
+
+output "secret_customer_arn" {
+  value = aws_secretsmanager_secret.qualys_customer_id.arn
 }
 
 output "iam_policy_arn" {

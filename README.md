@@ -2,24 +2,24 @@
 
 Terraform modules to deploy the Qualys Cloud Agent to **existing infrastructure** across AWS, Azure, GCP, OCI, and Alibaba Cloud.
 
-No VMs are created. Each module stores your Qualys credentials in the cloud's native secret manager and uses the cloud's native remote execution mechanism to install the agent on your existing instances.
+No VMs are created. Each module stores your Qualys enrollment IDs (Activation ID + Customer ID) in the cloud's native secret manager, grants your existing instances least-privilege read access, and installs the agent from an installer **you pre-stage**. No Qualys API credentials are ever placed on your instances — you host the agent installer (a bucket or internal mirror) and instances pull it directly.
 
 ## How It Works
 
-| Cloud | Secret Storage | Deployment Mechanism | Targeting |
-|-------|---------------|---------------------|-----------|
-| GCP | Secret Manager | OS Config Policy (VM Manager) | Labels per zone |
-| AWS | Secrets Manager | SSM Document + Association | Instance tags |
-| Azure | Key Vault | Run Command / VM Extension | Manual or per-VM |
-| OCI | OCI Vault | Dynamic group + Run Command | Freeform tags |
-| Alibaba | KMS Secrets | Cloud Assistant Command | Instance selection |
+| Cloud | Secret Storage | Install Mechanism | Targeting |
+|-------|---------------|-------------------|-----------|
+| GCP | Secret Manager | OS Config Policy (VM Manager) — runs automatically | Labels per zone |
+| AWS | Secrets Manager | SSM Document + Association — runs automatically | Instance tags |
+| Azure | Key Vault | Install-script output, you run via `az vm run-command` | Per-VM |
+| OCI | OCI Vault | Install-script output, you run via OCI Run Command | Defined tag |
+| Alibaba | KMS Secrets | Cloud Assistant Command, you invoke | Instance selection |
 
 Each module:
 1. Stores your Activation ID and Customer ID in the cloud's secret manager
 2. Grants existing instances least-privilege access to read those secrets
-3. Provides a deployment mechanism to install the agent
+3. Installs the agent from your pre-staged installer — GCP and AWS run automatically; Azure, OCI, and Alibaba emit a command/script you invoke against your instances
 
-The agent install scripts are idempotent — if the agent is already running, they exit cleanly.
+The install scripts are idempotent — if the agent is already running, they exit cleanly.
 
 ## Quick Start (GCP)
 
@@ -44,9 +44,9 @@ Or set `target_all_vms = true` in your config to deploy to every VM.
 
 ## Configuration
 
-### Required: Qualys Credentials
+### Required: Qualys enrollment IDs
 
-Get the Activation ID and Customer ID from the Qualys Console under Assets > Agents. The API username/password need the `API Access` permission plus `Asset Management > Read Asset`.
+Get the Activation ID and Customer ID from the Qualys Console under Cloud Agent > Agents. These are the only Qualys secrets stored — no API credentials are needed or distributed.
 
 ```hcl
 qualys_activation_id = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
@@ -54,23 +54,31 @@ qualys_customer_id   = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
 
 # Where the installed agent phones home
 qualys_server_uri = "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
-
-# API base URL — used to download the agent binary (different from server_uri)
-qualys_base_url = "https://qualysguard.qg2.apps.qualys.com"
-
-qualys_api_username = "api_user"
-qualys_api_password = "secure_password"
 ```
 
-Match the URLs to your platform (find yours at <https://www.qualys.com/platform-identification>):
+Match `qualys_server_uri` to your platform (find yours at <https://www.qualys.com/platform-identification>):
 
-| Platform | `qualys_server_uri` | `qualys_base_url` |
-|----------|---------------------|-------------------|
-| US Platform 1 | `https://qagpublic.qg1.apps.qualys.com/CloudAgent/` | `https://qualysguard.qualys.com` |
-| US Platform 2 | `https://qagpublic.qg2.apps.qualys.com/CloudAgent/` | `https://qualysguard.qg2.apps.qualys.com` |
-| US Platform 3 | `https://qagpublic.qg3.apps.qualys.com/CloudAgent/` | `https://qualysguard.qg3.apps.qualys.com` |
-| EU Platform 1 | `https://qagpublic.qg1.apps.qualys.eu/CloudAgent/` | `https://qualysguard.qualys.eu` |
-| India | `https://qagpublic.qg1.apps.qualys.in/CloudAgent/` | `https://qualysguard.qg1.apps.qualys.in` |
+| Platform | `qualys_server_uri` |
+|----------|---------------------|
+| US Platform 1 | `https://qagpublic.qg1.apps.qualys.com/CloudAgent/` |
+| US Platform 2 | `https://qagpublic.qg2.apps.qualys.com/CloudAgent/` |
+| US Platform 3 | `https://qagpublic.qg3.apps.qualys.com/CloudAgent/` |
+| EU Platform 1 | `https://qagpublic.qg1.apps.qualys.eu/CloudAgent/` |
+| India | `https://qagpublic.qg1.apps.qualys.in/CloudAgent/` |
+
+### Required: pre-staged installer packages
+
+Download the agent installers once from the Qualys Console (Cloud Agent > Agent Installation) and host them somewhere your instances can reach (a cloud bucket, internal mirror, etc.). Instances pull these directly, so **no Qualys API credentials touch the fleet**. Provide only the entries matching your target OSes:
+
+```hcl
+qualys_packages = {
+  deb     = "https://my-mirror.example.com/qualys/QualysCloudAgent.deb"  # Debian/Ubuntu
+  rpm     = "https://my-mirror.example.com/qualys/QualysCloudAgent.rpm"  # RHEL/CentOS/Rocky/Amazon/SUSE
+  windows = "https://my-mirror.example.com/qualys/QualysCloudAgent.exe"  # Windows
+}
+```
+
+Make sure the hosting location is reachable from your instances and, if private, that their existing instance roles/identities can read it.
 
 ### GCP Config
 
@@ -91,9 +99,11 @@ gcp_config = {
 
 The GCP module uses [OS Config policies](https://cloud.google.com/compute/vm-manager/docs/os-policies/create-os-policy-assignment) which:
 - Run per-zone (one policy assignment per zone you list)
-- Automatically detect the OS (Debian/Ubuntu, RHEL/CentOS, SUSE) and install the right package
+- Automatically detect the OS (Debian/Ubuntu, RHEL/CentOS, SUSE) and install the matching `qualys_packages` entry
 - Re-check compliance periodically and reinstall if the agent is removed
 - Roll out gradually based on `rollout_percent`
+
+**Prerequisites**: the VM Manager (OS Config) agent must be enabled on your VMs, and the module grants secret access to the project's **default compute service account**. If your VMs run as a custom service account, grant it `roles/secretmanager.secretAccessor` on the two secrets yourself.
 
 ### AWS Config
 
@@ -109,11 +119,11 @@ aws_config = {
 ```
 
 The AWS module creates:
-- A Secrets Manager secret with your credentials
-- SSM documents for Linux and Windows
+- Two Secrets Manager secrets (`qualys-activation-id`, `qualys-customer-id`)
+- SSM documents for Linux and Windows that pull the pre-staged installer
 - SSM associations that auto-run daily against tagged instances
 
-**Prerequisites**: Your instances need the SSM agent running and an IAM role with the output `iam_policy_arn` attached.
+**Prerequisites**: Your instances need the SSM agent running and an instance profile carrying both `AmazonSSMManagedInstanceCore` (for SSM itself) and the module's output `iam_policy_arn` (to read the two secrets).
 
 ### Azure Config
 
@@ -126,7 +136,14 @@ azure_config = {
 }
 ```
 
-Creates a Key Vault with your credentials. Use the vault with VM extensions or Run Command to install on your VMs.
+Creates a Key Vault holding the two enrollment IDs and grants `Get` access to the VM managed identities you pass in `azure_config.vm_principal_ids`. The module outputs ready-to-run `install_script_linux` / `install_script_windows` — the VM's managed identity reads the secrets and pulls the installer. Run a script against a VM with:
+
+```bash
+az vm run-command invoke -g qualys-agents-rg -n my-vm \
+  --command-id RunShellScript --scripts @<(echo "$INSTALL_SCRIPT_LINUX")
+```
+
+where `$INSTALL_SCRIPT_LINUX` is the module's `install_script_linux` output. Azure has no tag-targeted fleet install primitive, so you invoke the script per VM (or wrap it in your own loop). Each VM also needs the Azure CLI and a managed identity included in `vm_principal_ids`.
 
 ### OCI Config
 
@@ -138,7 +155,7 @@ oci_config = {
 }
 ```
 
-Creates a Vault with secrets and a dynamic group policy. Tag your instances with `qualys-agent=true` to grant them secret access.
+Creates a Vault with the two enrollment IDs, a **defined tag** (`qualys.agent`, created by the module), a dynamic group that matches instances carrying that tag, and a policy granting them secret read. Apply the defined tag `qualys.agent = "true"` to the instances you want enrolled (freeform tags do **not** work in OCI dynamic-group rules). The module outputs an `install_script` to run via OCI Run Command — the instance principal reads the secrets and pulls the installer.
 
 ### Alibaba Cloud Config
 
@@ -150,7 +167,7 @@ alicloud_config = {
 }
 ```
 
-Creates KMS secrets and a Cloud Assistant command. Invoke the command against your ECS instances to install.
+Creates KMS secrets and a Cloud Assistant command that pulls the pre-staged installer. Invoke the command (output `command_id`) against your ECS instances to install.
 
 ## Enabling Multiple Clouds
 
@@ -161,11 +178,16 @@ Creates KMS secrets and a Cloud Assistant command. Invoke the command against yo
 
 ## Security
 
-- **Least privilege**: Each module grants read access only to the specific secrets needed, not project/account-wide
+- **No API credentials on the fleet**: instances only ever read the Activation ID + Customer ID and pull a pre-staged installer. Qualys API credentials are never stored in the modules, in state, or on your instances.
+- **Least privilege**: Each module grants read access only to the two specific secrets, not project/account-wide
 - **No VMs created**: This module doesn't create compute resources or open network ports
-- **Secrets in native stores**: Credentials are stored in each cloud's secret manager, never in Terraform state as plaintext (marked `sensitive`)
+- **Secrets in native stores**: Enrollment IDs live in each cloud's secret manager, never in Terraform state as plaintext (marked `sensitive`)
 - **Idempotent installs**: Scripts check if the agent is running before attempting installation
 - **Gradual rollout**: GCP/AWS deployments roll out incrementally, not all-at-once
+
+### Operational note: secret recovery windows
+
+AWS secrets keep a 7-day recovery window and the Azure Key Vault has soft-delete + purge protection enabled. Because the names are deterministic, a `destroy` followed by a fresh `apply` within the retention window can fail on a name collision. In dev, either wait out the window or purge the soft-deleted secret/vault before re-applying.
 
 ## Verifying Installation
 
@@ -193,9 +215,9 @@ The agent should appear in your Qualys Console within 5-10 minutes.
 ├── terraform.tfvars.example # Example configuration
 └── modules/
     ├── gcp/main.tf          # GCP: Secret Manager + OS Config policies
-    ├── aws/main.tf          # AWS: Secrets Manager + SSM documents
-    ├── azure/main.tf        # Azure: Key Vault
-    ├── oci/main.tf          # OCI: Vault + dynamic group
+    ├── aws/main.tf          # AWS: Secrets Manager + SSM documents + associations
+    ├── azure/main.tf        # Azure: Key Vault + VM access policy + install scripts
+    ├── oci/main.tf          # OCI: Vault + defined tag + dynamic group + install script
     └── alicloud/main.tf     # Alibaba: KMS + Cloud Assistant command
 ```
 

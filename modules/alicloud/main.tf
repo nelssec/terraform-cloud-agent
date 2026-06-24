@@ -30,18 +30,14 @@ variable "qualys_server_uri" {
   type = string
 }
 
-variable "qualys_base_url" {
-  type = string
-}
-
-variable "qualys_api_username" {
-  type      = string
-  sensitive = true
-}
-
-variable "qualys_api_password" {
-  type      = string
-  sensitive = true
+variable "qualys_packages" {
+  description = "Pre-staged installer URLs the instances pull from (deb/rpm/windows). No Qualys API creds reach the fleet."
+  type = object({
+    deb     = optional(string, "")
+    rpm     = optional(string, "")
+    windows = optional(string, "")
+  })
+  default = {}
 }
 
 variable "region" {
@@ -71,20 +67,6 @@ resource "alicloud_kms_secret" "customer_id" {
   secret_data                   = var.qualys_customer_id
   version_id                    = "v1"
   description                   = "Qualys Cloud Agent Customer ID"
-  force_delete_without_recovery = false
-  tags                          = var.tags
-}
-
-resource "alicloud_kms_secret" "api_credentials" {
-  secret_name = "qualys-api-credentials"
-  secret_data = jsonencode({
-    api_username = var.qualys_api_username
-    api_password = var.qualys_api_password
-    server_uri   = var.qualys_server_uri
-    base_url     = var.qualys_base_url
-  })
-  version_id                    = "v1"
-  description                   = "Qualys API credentials and URIs"
   force_delete_without_recovery = false
   tags                          = var.tags
 }
@@ -130,22 +112,13 @@ resource "alicloud_ecs_command" "install_qualys" {
     if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then echo "Agent already running"; exit 0; fi
     ACTIVATION_ID=$(aliyun kms GetSecretValue --SecretName qualys-activation-id --query SecretData --output text 2>/dev/null)
     CUSTOMER_ID=$(aliyun kms GetSecretValue --SecretName qualys-customer-id --query SecretData --output text 2>/dev/null)
-    API_CREDS=$(aliyun kms GetSecretValue --SecretName qualys-api-credentials --query SecretData --output text 2>/dev/null)
-    API_USER=$(echo "$API_CREDS" | jq -r '.api_username')
-    API_PASS=$(echo "$API_CREDS" | jq -r '.api_password')
-    SERVER_URI=$(echo "$API_CREDS" | jq -r '.server_uri')
-    BASE_URL=$(echo "$API_CREDS" | jq -r '.base_url')
     if [ -z "$ACTIVATION_ID" ] || [ -z "$CUSTOMER_ID" ]; then echo "Failed to get credentials"; exit 1; fi
-    curl -u "$API_USER:$API_PASS" -X POST \
-      -H "Content-Type: text/xml" -H "X-Requested-With: curl" \
-      -d '<?xml version="1.0" encoding="UTF-8"?><ServiceRequest><data><DownloadBinary><platform>LINUX</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>' \
-      "$BASE_URL/qps/rest/1.0/download/ca/downloadbinary/" \
-      -o /tmp/qualys-agent.rpm
+    curl -fSL "${var.qualys_packages.rpm}" -o /tmp/qualys-agent.rpm
     rpm -ivh /tmp/qualys-agent.rpm || yum install -y /tmp/qualys-agent.rpm || dnf install -y /tmp/qualys-agent.rpm
-    /usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh ActivationId="$ACTIVATION_ID" CustomerId="$CUSTOMER_ID" ServerUri="$SERVER_URI"
+    /usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh ActivationId="$ACTIVATION_ID" CustomerId="$CUSTOMER_ID" ServerUri="${var.qualys_server_uri}"
     systemctl enable qualys-cloud-agent && systemctl restart qualys-cloud-agent
     rm -f /tmp/qualys-agent.rpm
-    unset ACTIVATION_ID CUSTOMER_ID API_USER API_PASS API_CREDS SERVER_URI BASE_URL
+    unset ACTIVATION_ID CUSTOMER_ID
   SCRIPT
   )
 }

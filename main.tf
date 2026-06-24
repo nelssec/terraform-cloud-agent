@@ -60,9 +60,7 @@ module "gcp_qualys" {
   qualys_activation_id = var.qualys_activation_id
   qualys_customer_id   = var.qualys_customer_id
   qualys_server_uri    = var.qualys_server_uri
-  qualys_base_url      = var.qualys_base_url
-  qualys_api_username  = var.qualys_api_username
-  qualys_api_password  = var.qualys_api_password
+  qualys_packages      = var.qualys_packages
 
   target_all_vms   = var.gcp_config.target_all_vms
   inclusion_labels = var.gcp_config.inclusion_labels
@@ -83,9 +81,7 @@ module "gcp_qualys" {
 #   qualys_activation_id = var.qualys_activation_id
 #   qualys_customer_id   = var.qualys_customer_id
 #   qualys_server_uri    = var.qualys_server_uri
-#   qualys_base_url      = var.qualys_base_url
-#   qualys_api_username  = var.qualys_api_username
-#   qualys_api_password  = var.qualys_api_password
+#   qualys_packages      = var.qualys_packages
 #   region               = var.aws_config.region
 #   target_tags          = var.aws_config.target_tags
 #   tags                 = local.common_labels
@@ -102,11 +98,10 @@ module "gcp_qualys" {
 #   qualys_activation_id = var.qualys_activation_id
 #   qualys_customer_id   = var.qualys_customer_id
 #   qualys_server_uri    = var.qualys_server_uri
-#   qualys_base_url      = var.qualys_base_url
-#   qualys_api_username  = var.qualys_api_username
-#   qualys_api_password  = var.qualys_api_password
+#   qualys_packages      = var.qualys_packages
 #   resource_group_name  = var.azure_config.resource_group_name
 #   location             = var.azure_config.location
+#   vm_principal_ids     = var.azure_config.vm_principal_ids
 #   tags                 = local.common_labels
 # }
 
@@ -121,9 +116,7 @@ module "gcp_qualys" {
 #   qualys_activation_id = var.qualys_activation_id
 #   qualys_customer_id   = var.qualys_customer_id
 #   qualys_server_uri    = var.qualys_server_uri
-#   qualys_base_url      = var.qualys_base_url
-#   qualys_api_username  = var.qualys_api_username
-#   qualys_api_password  = var.qualys_api_password
+#   qualys_packages      = var.qualys_packages
 #   compartment_id       = var.oci_config.compartment_id
 #   freeform_tags        = local.common_labels
 # }
@@ -139,9 +132,7 @@ module "gcp_qualys" {
 #   qualys_activation_id = var.qualys_activation_id
 #   qualys_customer_id   = var.qualys_customer_id
 #   qualys_server_uri    = var.qualys_server_uri
-#   qualys_base_url      = var.qualys_base_url
-#   qualys_api_username  = var.qualys_api_username
-#   qualys_api_password  = var.qualys_api_password
+#   qualys_packages      = var.qualys_packages
 #   region               = var.alicloud_config.region
 #   tags                 = local.common_labels
 # }

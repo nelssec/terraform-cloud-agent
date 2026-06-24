@@ -24,26 +24,19 @@ variable "qualys_server_uri" {
   }
 }
 
-variable "qualys_base_url" {
-  description = "Qualys API base URL — used for downloading agent binaries (e.g., https://qualysguard.qg2.apps.qualys.com)"
-  type        = string
-
-  validation {
-    condition     = can(regex("^https://", var.qualys_base_url))
-    error_message = "Base URL must start with https://"
-  }
-}
-
-variable "qualys_api_username" {
-  description = "Qualys API username (needs Access Permission API Access + Asset Management Permission Read Asset)"
-  type        = string
-  sensitive   = true
-}
-
-variable "qualys_api_password" {
-  description = "Qualys API password"
-  type        = string
-  sensitive   = true
+variable "qualys_packages" {
+  description = <<-DESC
+    URLs to the pre-staged Qualys Cloud Agent installer packages. You host these
+    (e.g., a bucket or internal mirror) and target instances pull them directly,
+    so no Qualys API credentials are distributed to the fleet. Provide only the
+    entries matching your target operating systems; leave the rest empty.
+  DESC
+  type = object({
+    deb     = optional(string, "") # Debian / Ubuntu .deb
+    rpm     = optional(string, "") # RHEL / CentOS / Rocky / Amazon Linux / SUSE .rpm
+    windows = optional(string, "") # Windows .exe
+  })
+  default = {}
 }
 
 # -----------------------------------------------------------------------------
@@ -141,6 +134,7 @@ variable "gcp_config" {
 #   type = object({
 #     resource_group_name = string
 #     location            = string
+#     vm_principal_ids    = optional(list(string), [])
 #   })
 #   default = {
 #     resource_group_name = "qualys-agents-rg"

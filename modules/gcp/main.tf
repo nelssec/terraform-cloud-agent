@@ -39,19 +39,14 @@ variable "qualys_server_uri" {
   type        = string
 }
 
-variable "qualys_base_url" {
-  description = "Qualys API base URL (e.g., https://qualysguard.qg2.apps.qualys.com)"
-  type        = string
-}
-
-variable "qualys_api_username" {
-  type      = string
-  sensitive = true
-}
-
-variable "qualys_api_password" {
-  type      = string
-  sensitive = true
+variable "qualys_packages" {
+  description = "Pre-staged installer URLs the instances pull from (deb/rpm/windows). No Qualys API creds reach the fleet."
+  type = object({
+    deb     = optional(string, "")
+    rpm     = optional(string, "")
+    windows = optional(string, "")
+  })
+  default = {}
 }
 
 variable "target_all_vms" {
@@ -143,40 +138,6 @@ resource "google_secret_manager_secret_version" "qualys_customer_id" {
   secret_data = var.qualys_customer_id
 }
 
-resource "google_secret_manager_secret" "qualys_api_username" {
-  secret_id = "qualys-api-username"
-  project   = var.project_id
-  labels    = var.labels
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.required_apis]
-}
-
-resource "google_secret_manager_secret_version" "qualys_api_username" {
-  secret      = google_secret_manager_secret.qualys_api_username.id
-  secret_data = var.qualys_api_username
-}
-
-resource "google_secret_manager_secret" "qualys_api_password" {
-  secret_id = "qualys-api-password"
-  project   = var.project_id
-  labels    = var.labels
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.required_apis]
-}
-
-resource "google_secret_manager_secret_version" "qualys_api_password" {
-  secret      = google_secret_manager_secret.qualys_api_password.id
-  secret_data = var.qualys_api_password
-}
-
 # -----------------------------------------------------------------------------
 # IAM — let the default compute SA read the secrets
 # Scoped to these specific secrets only, not project-wide.
@@ -190,8 +151,6 @@ locals {
   secret_ids = [
     google_secret_manager_secret.qualys_activation_id.id,
     google_secret_manager_secret.qualys_customer_id.id,
-    google_secret_manager_secret.qualys_api_username.id,
-    google_secret_manager_secret.qualys_api_password.id,
   ]
 }
 
@@ -206,11 +165,9 @@ resource "google_secret_manager_secret_iam_member" "compute_sa_access" {
 # OS Config Policy — install Qualys agent on existing VMs
 # One assignment per zone (OS Config requires zone-level targeting).
 #
-# Download uses the Qualys API:
-#   POST /qps/rest/1.0/download/ca/downloadbinary/
-#   with XML body specifying platform and architecture, basic auth.
-#
-# Activation passes ServerUri so the agent phones home to the correct platform.
+# The installer is pulled from a pre-staged URL (var.qualys_packages); only the
+# ActivationId/CustomerId secrets are read on the instance — no Qualys API
+# credentials. Activation passes ServerUri so the agent phones home correctly.
 # -----------------------------------------------------------------------------
 
 resource "google_os_config_os_policy_assignment" "qualys_agent" {
@@ -253,7 +210,9 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
         exec {
           validate {
             interpreter = "SHELL"
-            script      = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 0; else exit 1; fi"
+            # OS Config validate convention: exit 100 = in desired state (compliant),
+            # exit 101 = not in desired state (run enforce). Any other code = error.
+            script = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 100; else exit 101; fi"
           }
           enforce {
             interpreter = "SHELL"
@@ -263,16 +222,9 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               PROJECT="${var.project_id}"
               ACTIVATION_ID=$(gcloud secrets versions access latest --secret="qualys-activation-id" --project="$PROJECT")
               CUSTOMER_ID=$(gcloud secrets versions access latest --secret="qualys-customer-id" --project="$PROJECT")
-              API_USER=$(gcloud secrets versions access latest --secret="qualys-api-username" --project="$PROJECT")
-              API_PASS=$(gcloud secrets versions access latest --secret="qualys-api-password" --project="$PROJECT")
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -y && apt-get install -y curl
-              curl -u "$API_USER:$API_PASS" -X POST \
-                -H "Content-Type: text/xml" \
-                -H "X-Requested-With: curl" \
-                -d '<?xml version="1.0" encoding="UTF-8"?><ServiceRequest><data><DownloadBinary><platform>LINUX_UBUNTU</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>' \
-                "${var.qualys_base_url}/qps/rest/1.0/download/ca/downloadbinary/" \
-                -o /tmp/qualys-agent.deb
+              curl -fSL "${var.qualys_packages.deb}" -o /tmp/qualys-agent.deb
               dpkg -i /tmp/qualys-agent.deb || apt-get install -f -y
               /usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh \
                 ActivationId="$ACTIVATION_ID" \
@@ -281,7 +233,7 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               systemctl enable qualys-cloud-agent
               systemctl restart qualys-cloud-agent
               rm -f /tmp/qualys-agent.deb
-              unset ACTIVATION_ID CUSTOMER_ID API_USER API_PASS
+              unset ACTIVATION_ID CUSTOMER_ID
               exit 100
             SCRIPT
           }
@@ -300,7 +252,9 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
         exec {
           validate {
             interpreter = "SHELL"
-            script      = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 0; else exit 1; fi"
+            # OS Config validate convention: exit 100 = in desired state (compliant),
+            # exit 101 = not in desired state (run enforce). Any other code = error.
+            script = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 100; else exit 101; fi"
           }
           enforce {
             interpreter = "SHELL"
@@ -310,14 +264,7 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               PROJECT="${var.project_id}"
               ACTIVATION_ID=$(gcloud secrets versions access latest --secret="qualys-activation-id" --project="$PROJECT")
               CUSTOMER_ID=$(gcloud secrets versions access latest --secret="qualys-customer-id" --project="$PROJECT")
-              API_USER=$(gcloud secrets versions access latest --secret="qualys-api-username" --project="$PROJECT")
-              API_PASS=$(gcloud secrets versions access latest --secret="qualys-api-password" --project="$PROJECT")
-              curl -u "$API_USER:$API_PASS" -X POST \
-                -H "Content-Type: text/xml" \
-                -H "X-Requested-With: curl" \
-                -d '<?xml version="1.0" encoding="UTF-8"?><ServiceRequest><data><DownloadBinary><platform>LINUX</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>' \
-                "${var.qualys_base_url}/qps/rest/1.0/download/ca/downloadbinary/" \
-                -o /tmp/qualys-agent.rpm
+              curl -fSL "${var.qualys_packages.rpm}" -o /tmp/qualys-agent.rpm
               rpm -ivh /tmp/qualys-agent.rpm || yum install -y /tmp/qualys-agent.rpm || dnf install -y /tmp/qualys-agent.rpm
               /usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh \
                 ActivationId="$ACTIVATION_ID" \
@@ -326,7 +273,7 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               systemctl enable qualys-cloud-agent
               systemctl restart qualys-cloud-agent
               rm -f /tmp/qualys-agent.rpm
-              unset ACTIVATION_ID CUSTOMER_ID API_USER API_PASS
+              unset ACTIVATION_ID CUSTOMER_ID
               exit 100
             SCRIPT
           }
@@ -345,7 +292,9 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
         exec {
           validate {
             interpreter = "SHELL"
-            script      = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 0; else exit 1; fi"
+            # OS Config validate convention: exit 100 = in desired state (compliant),
+            # exit 101 = not in desired state (run enforce). Any other code = error.
+            script = "if systemctl is-active --quiet qualys-cloud-agent 2>/dev/null; then exit 100; else exit 101; fi"
           }
           enforce {
             interpreter = "SHELL"
@@ -355,14 +304,7 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               PROJECT="${var.project_id}"
               ACTIVATION_ID=$(gcloud secrets versions access latest --secret="qualys-activation-id" --project="$PROJECT")
               CUSTOMER_ID=$(gcloud secrets versions access latest --secret="qualys-customer-id" --project="$PROJECT")
-              API_USER=$(gcloud secrets versions access latest --secret="qualys-api-username" --project="$PROJECT")
-              API_PASS=$(gcloud secrets versions access latest --secret="qualys-api-password" --project="$PROJECT")
-              curl -u "$API_USER:$API_PASS" -X POST \
-                -H "Content-Type: text/xml" \
-                -H "X-Requested-With: curl" \
-                -d '<?xml version="1.0" encoding="UTF-8"?><ServiceRequest><data><DownloadBinary><platform>LINUX</platform><architecture>X_86_64</architecture></DownloadBinary></data></ServiceRequest>' \
-                "${var.qualys_base_url}/qps/rest/1.0/download/ca/downloadbinary/" \
-                -o /tmp/qualys-agent.rpm
+              curl -fSL "${var.qualys_packages.rpm}" -o /tmp/qualys-agent.rpm
               zypper install -y /tmp/qualys-agent.rpm
               /usr/local/qualys/cloud-agent/bin/qualys-cloud-agent.sh \
                 ActivationId="$ACTIVATION_ID" \
@@ -371,7 +313,7 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
               systemctl enable qualys-cloud-agent
               systemctl restart qualys-cloud-agent
               rm -f /tmp/qualys-agent.rpm
-              unset ACTIVATION_ID CUSTOMER_ID API_USER API_PASS
+              unset ACTIVATION_ID CUSTOMER_ID
               exit 100
             SCRIPT
           }
@@ -391,8 +333,6 @@ resource "google_os_config_os_policy_assignment" "qualys_agent" {
     google_project_service.required_apis,
     google_secret_manager_secret_version.qualys_activation_id,
     google_secret_manager_secret_version.qualys_customer_id,
-    google_secret_manager_secret_version.qualys_api_username,
-    google_secret_manager_secret_version.qualys_api_password,
     google_secret_manager_secret_iam_member.compute_sa_access,
   ]
 }

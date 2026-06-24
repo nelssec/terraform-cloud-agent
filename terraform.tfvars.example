@@ -16,20 +16,16 @@ qualys_customer_id   = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
 #   India:          https://qagpublic.qg1.apps.qualys.in/CloudAgent/
 qualys_server_uri = "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
 
-# API base URL — used to download agent binaries.
-# This is different from server_uri. Match it to your platform.
-# Examples:
-#   US Platform 1:  https://qualysguard.qualys.com
-#   US Platform 2:  https://qualysguard.qg2.apps.qualys.com
-#   US Platform 3:  https://qualysguard.qg3.apps.qualys.com
-#   EU Platform 1:  https://qualysguard.qualys.eu
-#   India:          https://qualysguard.qg1.apps.qualys.in
-qualys_base_url = "https://qualysguard.qg2.apps.qualys.com"
-
-# API credentials — needs: Access Permission API Access +
-# Asset Management Permission Read Asset
-qualys_api_username = "api_user"
-qualys_api_password = "secure_password"
+# Pre-staged installer packages. Download the Qualys Cloud Agent binaries once
+# from the Qualys Console (Cloud Agent > Agent Installation) and host them where
+# your instances can reach them (a bucket, internal mirror, etc.). Instances pull
+# these directly — no Qualys API credentials are placed on the fleet.
+# Provide only the entries matching your target OSes.
+qualys_packages = {
+  deb     = "https://my-mirror.example.com/qualys/QualysCloudAgent.deb"
+  rpm     = "https://my-mirror.example.com/qualys/QualysCloudAgent.rpm"
+  windows = "https://my-mirror.example.com/qualys/QualysCloudAgent.exe"
+}
 
 # =============================================================================
 # Deployment Settings
