@@ -43,10 +43,10 @@ output "gcp_deployment" {
 
 output "deployment_summary" {
   value = {
-    qualys_base_url = var.qualys_base_url
+    qualys_base_url   = var.qualys_base_url
     qualys_server_uri = var.qualys_server_uri
-    environment     = var.environment
-    deployment_id   = var.deployment_id
+    environment       = var.environment
+    deployment_id     = var.deployment_id
     deployed_clouds = compact([
       var.deploy_to_gcp ? "GCP" : "",
       var.deploy_to_aws ? "AWS" : "",

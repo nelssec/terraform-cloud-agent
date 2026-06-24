@@ -46,19 +46,31 @@ Or set `target_all_vms = true` in your config to deploy to every VM.
 
 ### Required: Qualys Credentials
 
-Get these from the Qualys Console under Assets > Agents:
+Get the Activation ID and Customer ID from the Qualys Console under Assets > Agents. The API username/password need the `API Access` permission plus `Asset Management > Read Asset`.
 
 ```hcl
 qualys_activation_id = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
 qualys_customer_id   = "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
-qualys_platform      = "qualysguard.qualys.com"
+
+# Where the installed agent phones home
+qualys_server_uri = "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+
+# API base URL — used to download the agent binary (different from server_uri)
+qualys_base_url = "https://qualysguard.qg2.apps.qualys.com"
+
+qualys_api_username = "api_user"
+qualys_api_password = "secure_password"
 ```
 
-Common platform URLs:
-- US Platform 1: `qualysguard.qualys.com`
-- US Platform 2: `qualysguard.qg2.apps.qualys.com`
-- EU: `qualysguard.qualys.eu`
-- India: `qualysguard.qg1.apps.qualys.in`
+Match the URLs to your platform (find yours at <https://www.qualys.com/platform-identification>):
+
+| Platform | `qualys_server_uri` | `qualys_base_url` |
+|----------|---------------------|-------------------|
+| US Platform 1 | `https://qagpublic.qg1.apps.qualys.com/CloudAgent/` | `https://qualysguard.qualys.com` |
+| US Platform 2 | `https://qagpublic.qg2.apps.qualys.com/CloudAgent/` | `https://qualysguard.qg2.apps.qualys.com` |
+| US Platform 3 | `https://qagpublic.qg3.apps.qualys.com/CloudAgent/` | `https://qualysguard.qg3.apps.qualys.com` |
+| EU Platform 1 | `https://qagpublic.qg1.apps.qualys.eu/CloudAgent/` | `https://qualysguard.qualys.eu` |
+| India | `https://qagpublic.qg1.apps.qualys.in/CloudAgent/` | `https://qualysguard.qg1.apps.qualys.in` |
 
 ### GCP Config
 
